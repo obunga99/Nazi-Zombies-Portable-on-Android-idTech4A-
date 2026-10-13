@@ -1,0 +1,31 @@
+diff --git a/Q3E/src/main/jni/fteqw/engine/client/in_generic.c b/Q3E/src/main/jni/fteqw/engine/client/in_generic.c
+index 7d9cff4..017f89a 100644
+--- a/Q3E/src/main/jni/fteqw/engine/client/in_generic.c
++++ b/Q3E/src/main/jni/fteqw/engine/client/in_generic.c
+@@ -525,15 +525,18 @@ void IN_Commands(void)
+ 				ptr[ev->devid].delta[1] += ev->mouse.y;
+ 
+ 				//if we're emulating a cursor, make sure that's updated too.
+-				if (touchcursor < 0 && !vrui.enabled && Key_MouseShouldBeFree())
+-				{
+-					mousecursor_x += ev->mouse.x;
+-					mousecursor_y += ev->mouse.y;
+-					mousecursor_x = bound(0, mousecursor_x, vid.pixelwidth-1);
+-					mousecursor_y = bound(0, mousecursor_y, vid.pixelheight-1);
++				if (touchcursor < 0 && !vrui.enabled && Key_MouseShouldBeFree() && vid.width && vid.height && vid.pixelwidth && vid.pixelheight)
++				{	//deltas arrive in physical pixels, but the cursor lives in (console-scaled) virtual coordinates.
++					mousecursor_x += ev->mouse.x * vid.width / vid.pixelwidth;
++					mousecursor_y += ev->mouse.y * vid.height / vid.pixelheight;
++					mousecursor_x = bound(0, mousecursor_x, vid.width-1);
++					mousecursor_y = bound(0, mousecursor_y, vid.height-1);
++				}
++				if (vid.width && vid.height)
++				{	//oldpos is in physical pixels.
++					ptr[ev->devid].oldpos[0] = mousecursor_x * vid.pixelwidth / vid.width;
++					ptr[ev->devid].oldpos[1] = mousecursor_y * vid.pixelheight / vid.height;
+ 				}
+-				ptr[ev->devid].oldpos[0] = mousecursor_x;
+-				ptr[ev->devid].oldpos[1] = mousecursor_y;
+ 
+ 				if (m_forcewheel.value >= 2)
+ 					ptr[ev->devid].wheeldelta -= ev->mouse.z;

@@ -1,0 +1,549 @@
+diff --git a/Q3E/src/main/jni/fteqw/engine/client/cl_ents.c b/Q3E/src/main/jni/fteqw/engine/client/cl_ents.c
+index 90f11eb..6893a83 100644
+--- a/Q3E/src/main/jni/fteqw/engine/client/cl_ents.c
++++ b/Q3E/src/main/jni/fteqw/engine/client/cl_ents.c
+@@ -4599,6 +4599,8 @@ void CL_LinkPacketEntities (void)
+ 			ent->flags |= RF_NODEPTHTEST;
+ 		if (state->effects & EF_NOSHADOW)
+ 			ent->flags |= RF_NOSHADOW;
++		if (state->effects & EF_FULLBRIGHT)
++			ent->flags |= RF_FULLBRIGHT;
+ 		if (state->trans < 0xfe)
+ 		{
+ 			ent->shaderRGBAf[3] = state->trans/(float)0xfe;
+diff --git a/Q3E/src/main/jni/fteqw/engine/client/cl_main.c b/Q3E/src/main/jni/fteqw/engine/client/cl_main.c
+index 74b1256..82c9fe0 100644
+--- a/Q3E/src/main/jni/fteqw/engine/client/cl_main.c
++++ b/Q3E/src/main/jni/fteqw/engine/client/cl_main.c
+@@ -3808,7 +3808,6 @@ void CL_Changing_f (void)
+ 	if (cls.state)
+ 	{
+ 		cls.state = ca_connected;	// not active anymore, but not disconnected
+-		Con_TPrintf ("\nChanging map...\n");
+ 	}
+ 	else
+ 		Con_Printf("Changing while not connected\n");
+@@ -5401,6 +5400,8 @@ void CL_FTP_f(void)
+ }
+ #endif
+ 
++vec3_t fakergb;
++
+ //fixme: make a cvar
+ void CL_Fog_f(void)
+ {
+@@ -5412,69 +5413,118 @@ void CL_Fog_f(void)
+ 		ftype = FOGTYPE_SKYROOM;
+ 	else //fog
+ 		ftype = FOGTYPE_AIR;
+-	if ((cl.fog_locked && !Cmd_FromGamecode() && !cls.allow_cheats) || Cmd_Argc() <= 1)
+-	{
+-		static const char *fognames[FOGTYPE_COUNT]={"fog","waterfog","skyroomfog"};
+-		if (Cmd_ExecLevel != RESTRICT_INSECURE)
+-			Con_Printf("Current %s %f (r:%f g:%f b:%f, a:%f bias:%f)\n", fognames[ftype], cl.fog[ftype].density, cl.fog[ftype].colour[0], cl.fog[ftype].colour[1], cl.fog[ftype].colour[2], cl.fog[ftype].alpha, cl.fog[ftype].depthbias);
++
++	//
++	// NZ:P Team fog modification START
++	// ----
++	// dQuake puts us in a shitty position requiring inaccurate fog stuffs..
++	// but it does mean we get to restore GL_FOG_START and GL_FOG_END which
++	// is NICE!
++	// ----
++	// here's the gist on the issue:
++	// dQuake takes values 0-255 as "RGB" values for the fog. These aren't
++	// really RGB though, they just multiply the value by 0.01 and throw it
++	// into sceGuFog :s
++	// 
++	if ((cl.fog_locked && !Cmd_FromGamecode() && !cls.allow_cheats) || Cmd_Argc() <= 1) {
++		/*Con_Printf("usage:\n");
++		//Con_Printf("   fog <fade>\n");
++		Con_Printf("   fog <start> <end>\n");
++		Con_Printf("   fog <red> <green> <blue>\n");
++		Con_Printf("   fog <fade> <red> <green> <blue>\n");
++		Con_Printf("   fog <start> <end> <red> <green> <blue>\n");
++		Con_Printf("NOTE: start and end become density: ((start / end) / 2).\n");
++		//Con_Printf("   fog <start> <end> <red> <green> <blue> <fade>\n");
++		Con_Printf("current values:\n");
++		Con_Printf("   \"density\" is \"%f\"\n", cl.fog[ftype].density);
++		Con_Printf("   \"red\" is \"%f\"\n", fakergb[0]);
++		Con_Printf("   \"green\" is \"%f\"\n", fakergb[1]);
++		Con_Printf("   \"blue\" is \"%f\"\n", fakergb[2]);
++		//Con_Printf("   \"fade\" is \"%f\"\n", fade_time);*/
++		return;
+ 	}
+-	else
+-	{
+-		CL_ResetFog(ftype);
+-		VectorSet(rgb, 0.3,0.3,0.3);
+ 
+-		switch(Cmd_Argc())
+-		{
+-		case 1:
++	CL_ResetFog(ftype);
++	VectorSet(rgb, 0.3, 0.3, 0.3);
++
++	switch(Cmd_Argc()) {
++		case 1: // Just in case it somehow gets this far :P
+ 			break;
+-		case 2:
+-			cl.fog[ftype].density = atof(Cmd_Argv(1));
++		case 2: // This used to be <fade>, but let's make try to it forward-compatible with distance stuff.
++			cl.fog[ftype].density = atof(Cmd_Argv(1)); // <end>
+ 			break;
+-		case 3:
+-			cl.fog[ftype].density = atof(Cmd_Argv(1));
+-			rgb[0] = rgb[1] = rgb[2] = atof(Cmd_Argv(2));
++		case 3: // <start> <end>
++			cl.fog[ftype].density = (atof(Cmd_Argv(1)) / atof(Cmd_Argv(2))) / 3; // <density>
+ 			break;
+-		case 4:
+-			cl.fog[ftype].density = 0.05;	//make something up for vauge compat with fitzquake, so it doesn't get the default of 0
+-			rgb[0] = atof(Cmd_Argv(1));
+-			rgb[1] = atof(Cmd_Argv(2));
+-			rgb[2] = atof(Cmd_Argv(3));
++		case 4: // <red> <green> <blue>
++			rgb[0] = atof(Cmd_Argv(1)); // <red>
++			rgb[1] = atof(Cmd_Argv(2)); // <green>
++			rgb[2] = atof(Cmd_Argv(3)); // <blue>
+ 			break;
+-		case 5:
+-		default:
+-			cl.fog[ftype].density = atof(Cmd_Argv(1));
+-			rgb[0] = atof(Cmd_Argv(2));
+-			rgb[1] = atof(Cmd_Argv(3));
+-			rgb[2] = atof(Cmd_Argv(4));
++		case 5: // <distance> <red> <green> <blue>
++			cl.fog[ftype].density = (1 / atof(Cmd_Argv(1))) / 3; // <density>
++			rgb[0] = atof(Cmd_Argv(2)); // <red>
++			rgb[1] = atof(Cmd_Argv(3)); // <green>
++			rgb[2] = atof(Cmd_Argv(4)); // <blue>
++			break;
++		case 6: // <start> <end> <red> <green> <blue>
++		case 7: // <start> <end> <red> <green> <blue> <fade> (dont do anything about fade)
++			cl.fog[ftype].density = (atof(Cmd_Argv(1)) / atof(Cmd_Argv(2))) / 3; // <density>
++			rgb[0] = atof(Cmd_Argv(3)); // <red>
++			rgb[1] = atof(Cmd_Argv(4)); // <green>
++			rgb[2] = atof(Cmd_Argv(5)); // <blue>
+ 			break;
++	}
++
++	// Have some means of detecting when someone used the old/vanilla FTE 0-1 values:
++	// Now with black fog hack!!!!!! WOOOO!!
++	if (rgb[0] <= 0.99 && rgb[1] <= 0.99 && rgb[2] <= 0.99 &&
++	rgb[0] != 0 && rgb[1] != 0 && rgb[2] != 0) {
++		// We'll say fuck it and guess some density :(
++		cl.fog[ftype].density = 0.1;
++
++		VectorSet(fakergb, rgb[0] * 255, rgb[1] * 255, rgb[2] * 255);
++	} else {
++		// We want to lie to hide the fact we're manipulating the hell out
++		// of this.
++		VectorSet(fakergb, rgb[0], rgb[1], rgb[2]);
++
++		// For some reason black fog breaks density.. I guess
++		if (rgb[0] == 0 && rgb[1] == 0 && rgb[2] == 0) {
++			cl.fog[ftype].density *= 3;
+ 		}
+ 
+-		if (rgb[0]>=2 || rgb[1]>=2 || rgb[2]>=2)	//we allow SOME slop for hdr fog... hopefully we won't need it. this is mostly just an issue when skyfog is enabled[default .5] ('why is my sky white on map FOO')
+-			Con_Printf(CON_WARNING "Fog colour of %g %g %g exceeds standard 0-1 range\n", rgb[0], rgb[1], rgb[2]);
+-		cl.fog[ftype].colour[0] = SRGBf(rgb[0]);
+-		cl.fog[ftype].colour[1] = SRGBf(rgb[1]);
+-		cl.fog[ftype].colour[2] = SRGBf(rgb[2]);
++		// Weird as fuck color hack !!! :)
++		if (rgb[0] != 0) {
++			rgb[0] = (10 * (exp(0.03 * rgb[0]) - 1)) + 20;
++			rgb[0] *= 0.01;
++		}
+ 
+-		if (cls.state == ca_active)
+-			cl.fog[ftype].time += 1;
++		if (rgb[1] != 0) {
++			rgb[1] = (10 * (exp(0.03 * rgb[1]) - 1)) + 20;
++			rgb[1] *= 0.01;
++		}
++		if (rgb[2] != 0) {
++			rgb[2] = (10 * (exp(0.03 * rgb[2]) - 1)) + 20;
++			rgb[2] *= 0.01;
++		}
++	}
+ 
+-		//fitz:
+-		//if (Cmd_Argc() >= 6) cl.fog[ftype].time += atof(Cmd_Argv(5));
+-		//dp:
+-		if (Cmd_Argc() >= 6) cl.fog[ftype].alpha = atof(Cmd_Argv(5));
+-		if (Cmd_Argc() >= 7) cl.fog[ftype].depthbias = atof(Cmd_Argv(6));
+-		//if (Cmd_Argc() >= 8) cl.fog[ftype].end = atof(Cmd_Argv(7));
+-		//if (Cmd_Argc() >= 9) cl.fog[ftype].height = atof(Cmd_Argv(8));
+-		//if (Cmd_Argc() >= 10) cl.fog[ftype].fadedepth = atof(Cmd_Argv(9));
++	//
++	// NZ:P Team fog modification END
++	//
+ 
+-		if (Cmd_FromGamecode())
+-			cl.fog_locked = !!cl.fog[ftype].density;
++	cl.fog[ftype].colour[0] = SRGBf(rgb[0]);
++	cl.fog[ftype].colour[1] = SRGBf(rgb[1]);
++	cl.fog[ftype].colour[2] = SRGBf(rgb[2]);
++
++	if (cls.state == ca_active)
++		cl.fog[ftype].time += 1;
+ 
+ #ifdef HAVE_LEGACY
+-		if (cl.fog[ftype].colour[0] > 1 || cl.fog[ftype].colour[1] > 1 || cl.fog[ftype].colour[2] > 1)
+-			Con_DPrintf(CON_WARNING "Fog is oversaturated. This can result in compatibility issues.\n");
++	if (cl.fog[ftype].colour[0] > 1 || cl.fog[ftype].colour[1] > 1 || cl.fog[ftype].colour[2] > 1)
++		Con_DPrintf(CON_WARNING "Fog is oversaturated. This can result in compatibility issues.\n");
+ #endif
+-	}
+ }
+ 
+ #ifdef _DEBUG
+diff --git a/Q3E/src/main/jni/fteqw/engine/client/cl_screen.c b/Q3E/src/main/jni/fteqw/engine/client/cl_screen.c
+index b89bc22..db716db 100644
+--- a/Q3E/src/main/jni/fteqw/engine/client/cl_screen.c
++++ b/Q3E/src/main/jni/fteqw/engine/client/cl_screen.c
+@@ -3346,7 +3346,7 @@ static void SCR_DrawCharToSnap (int num, qbyte *dest, int width)
+ 	{
+ 		size_t lumpsize;
+ 		qbyte lumptype;
+-		draw_chars = W_GetLumpName("conchars", &lumpsize, &lumptype);
++		draw_chars = W_GetLumpName("charset", &lumpsize, &lumptype);
+ //		if (lumptype != )
+ //			draw_chars = NULL;
+ 		if (!draw_chars || lumpsize != 128*128)
+diff --git a/Q3E/src/main/jni/fteqw/engine/client/cl_tent.c b/Q3E/src/main/jni/fteqw/engine/client/cl_tent.c
+index 197df4b..fc78135 100644
+--- a/Q3E/src/main/jni/fteqw/engine/client/cl_tent.c
++++ b/Q3E/src/main/jni/fteqw/engine/client/cl_tent.c
+@@ -267,8 +267,8 @@ static int beams_running;
+ 
+ static tentmodels_t beamtypes[] =
+ {
+-	{"progs/bolt.mdl",							"TE_LIGHTNING1",				"TE_LIGHTNING1_END"},
+-	{"progs/bolt2.mdl",							"TE_LIGHTNING2",				"TE_LIGHTNING2_END"},
++	{"models/misc/bolt.mdl",							"TE_LIGHTNING1",				"TE_LIGHTNING1_END"},
++	{"models/misc/bolt2.mdl",							"TE_LIGHTNING2",				"TE_LIGHTNING2_END"},
+ 	{"progs/bolt3.mdl",							"TE_LIGHTNING3",				"TE_LIGHTNING3_END"},
+ 	{"progs/beam.mdl",							"te_beam",						"te_beam_end"},	//a CTF addition, but has other potential uses, sadly.
+ 
+diff --git a/Q3E/src/main/jni/fteqw/engine/client/console.c b/Q3E/src/main/jni/fteqw/engine/client/console.c
+index b19ca2c..75e5f3a 100644
+--- a/Q3E/src/main/jni/fteqw/engine/client/console.c
++++ b/Q3E/src/main/jni/fteqw/engine/client/console.c
+@@ -1846,7 +1846,7 @@ void Con_DrawNotify (void)
+ 		char *foo = va(chat_team?"say_team: %s":"say: %s", Key_Demoji(demoji, sizeof(demoji), chat_buffer?(char*)chat_buffer:""));
+ 		int lines, i, pos;
+ 		Font_BeginString(font_console, 0, 0, &x, &y);
+-		y = con_numnotifylines.ival * Font_CharHeight();
++		y = 19 * Font_CharHeight();
+ 
+ 		i = chat_team?10:5;
+ 		pos = strlen(foo)+i;
+diff --git a/Q3E/src/main/jni/fteqw/engine/client/image.c b/Q3E/src/main/jni/fteqw/engine/client/image.c
+index a8277aa..8524c15 100644
+--- a/Q3E/src/main/jni/fteqw/engine/client/image.c
++++ b/Q3E/src/main/jni/fteqw/engine/client/image.c
+@@ -7514,7 +7514,7 @@ qbyte *ReadRawImageFile(qbyte *buf, int len, int *width, int *height, uploadfmt_
+ 			return data;
+ 		}
+ 		else if (len == 128*128 || len == 128*256)
+-		{	//conchars lump (or h2). 0 is transparent.
++		{	//charset lump (or h2). 0 is transparent.
+ 			qbyte *in = buf;
+ 			h = 128;
+ 			w = len/h;
+diff --git a/Q3E/src/main/jni/fteqw/engine/client/menu.h b/Q3E/src/main/jni/fteqw/engine/client/menu.h
+index b57df00..6704856 100644
+--- a/Q3E/src/main/jni/fteqw/engine/client/menu.h
++++ b/Q3E/src/main/jni/fteqw/engine/client/menu.h
+@@ -36,7 +36,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+ //These are the item types:
+ 
+ //mt_childwindow	-
+-//mt_button			- Executes a console command or callback on enter. Uses conchars.
++//mt_button			- Executes a console command or callback on enter. Uses charset.
+ //mt_buttonbigfont	- Used by hexen2's menus. Uses gfx/menu/bigfont.lmp as it's characters.
+ //mt_box			- A 2d box. The same one as the quit dialog from q1, but resized.
+ //mt_colouredbox	- Not used.
+diff --git a/Q3E/src/main/jni/fteqw/engine/client/net_master.c b/Q3E/src/main/jni/fteqw/engine/client/net_master.c
+index 30f6c85..158b289 100644
+--- a/Q3E/src/main/jni/fteqw/engine/client/net_master.c
++++ b/Q3E/src/main/jni/fteqw/engine/client/net_master.c
+@@ -3498,7 +3498,7 @@ static int CL_ReadServerInfo(char *msg, enum masterprotocol_e prototype, qboolea
+ 			info->special |= SS_QUAKE3;
+ #endif
+ #ifdef NQPROT
+-		else if (prototype == MP_NETQUAKE)
++		if (prototype == MP_NETQUAKE)
+ 			info->special |= SS_NETQUAKE;
+ #endif
+ 		else
+diff --git a/Q3E/src/main/jni/fteqw/engine/client/wad.c b/Q3E/src/main/jni/fteqw/engine/client/wad.c
+index d8837d8..03cd051 100644
+--- a/Q3E/src/main/jni/fteqw/engine/client/wad.c
++++ b/Q3E/src/main/jni/fteqw/engine/client/wad.c
+@@ -480,17 +480,17 @@ qbyte *W_GetTexture(const char *name, int *width, int *height, uploadfmt_t *form
+ 		p = W_GetLumpName(name+4, &lumpsize, &lumptype);
+ 		if (p)
+ 		{
+-			if (/*lumptype == TYP_MIPTEX && */!strcmp(name+4, "conchars") && (lumpsize==128*128
++			if (/*lumptype == TYP_MIPTEX && */!strcmp(name+4, "charset") && (lumpsize==128*128
+ #ifdef HAVE_LEGACY
+ 							|| (lumptype == TYP_QPIC&&lumpsize==8+128*128)
+ #endif
+ 							))
+-			{	//conchars has no header.
++			{	//charset has no header.
+ 				qbyte *lump = (qbyte*)p;
+ 				extern cvar_t con_ocranaleds;
+ 
+ 				if (lumpsize==8+128*128)
+-					Con_Printf(CON_WARNING"WARNING: gfx.wad conchars lump has incorrect lump size.\n");
++					Con_Printf(CON_WARNING"WARNING: gfx.wad charset lump has incorrect lump size.\n");
+ 
+ 				if (con_ocranaleds.ival)
+ 				{
+diff --git a/Q3E/src/main/jni/fteqw/engine/common/cmd.c b/Q3E/src/main/jni/fteqw/engine/common/cmd.c
+index b654415..5813f7b 100644
+--- a/Q3E/src/main/jni/fteqw/engine/common/cmd.c
++++ b/Q3E/src/main/jni/fteqw/engine/common/cmd.c
+@@ -4172,11 +4172,15 @@ static void Cmd_WriteConfig_f(void)
+ 
+ 		if (!strncmp(fname, "data/", 5))
+ 			nohidden = true;	//we're writing to the data/ dir, which mods may potentially read. don't write any settings they're not allowed to see.
++		// NZ:P Start -- allow saveconfig from gamecode
++#if 0
+ 		else if (Cmd_IsInsecure())
+ 		{
+ 			Con_Printf ("%s %s: not allowed\n", Cmd_Argv(0), Cmd_Args());
+ 			return;
+ 		}
++#endif
++		// NZ:P End
+ 
+ 		FS_DisplayPath(fname, FS_BASEGAMEONLY, displayname, sizeof(displayname));
+ 		FS_CreatePath(fname, FS_BASEGAMEONLY);
+diff --git a/Q3E/src/main/jni/fteqw/engine/common/com_mesh.c b/Q3E/src/main/jni/fteqw/engine/common/com_mesh.c
+index 5816d6e..df49ac1 100644
+--- a/Q3E/src/main/jni/fteqw/engine/common/com_mesh.c
++++ b/Q3E/src/main/jni/fteqw/engine/common/com_mesh.c
+@@ -106,7 +106,7 @@ static clampedmodel_t clampedmodel[] = {
+ 	{"progs/gib1.mdl", 374},
+ 	{"progs/gib2.mdl", 1779},
+ 	{"progs/gib3.mdl", 2066},
+-	{"progs/bolt2.mdl", 1160},
++	{"models/misc/bolt2.mdl", 1160},
+ 	{"progs/end1.mdl", 764},
+ 	{"progs/end2.mdl", 981},
+ 	{"progs/end3.mdl", 851},
+diff --git a/Q3E/src/main/jni/fteqw/engine/common/fs.c b/Q3E/src/main/jni/fteqw/engine/common/fs.c
+index df52c40..5c7fa8d 100644
+--- a/Q3E/src/main/jni/fteqw/engine/common/fs.c
++++ b/Q3E/src/main/jni/fteqw/engine/common/fs.c
+@@ -25,7 +25,7 @@ static char *vidfilenames[] =	//list of filenames to check to see if graphics st
+ 	"gfx.wad",
+ 	"gfx/conback.lmp"/*q1*/,"gfx/menu/conback.lmp"/*h2*/,"pics/conback.pcx"/*q2*/,	//misc stuff
+ 	"gfx/palette.lmp", "pics/colormap.pcx",
+-	"gfx/conchars.png",	//conchars...
++	"gfx/charset.png",	//charset...
+ 	"fonts/qfont.kfont", "gfx/mcharset.lmp",	//menu fonts
+ };
+ 
+@@ -6919,7 +6919,7 @@ qboolean FS_ChangeGame(ftemanifest_t *man, qboolean allowreloadconfigs, qboolean
+ #ifdef HAVE_CLIENT
+ 	qboolean allowvidrestart = true;
+ 	char *vidfile[] = {"gfx.wad", "gfx/conback.lmp"/*q1*/,"gfx/menu/conback.lmp"/*h2*/,"pics/conback.pcx"/*q2*/,	//misc stuff
+-		"gfx/palette.lmp", "pics/colormap.pcx", "gfx/conchars.png"};		//palettes
++		"gfx/palette.lmp", "pics/colormap.pcx", "gfx/charset.png"};		//palettes
+ 	searchpathfuncs_t *vidpath[countof(vidfile)];
+ 	char *menufile[] = {"menu.dat"/*mods*/, "gfx/ttl_main.lmp"/*q1*/, "pics/m_main_quit.pcx"/*q2*/, "gfx/menu/title0.lmp"/*h2*/};
+ 	searchpathfuncs_t *menupath[countof(menufile)];
+diff --git a/Q3E/src/main/jni/fteqw/engine/common/pr_bgcmd.c b/Q3E/src/main/jni/fteqw/engine/common/pr_bgcmd.c
+index 0e8cb21..7bbfe2f 100644
+--- a/Q3E/src/main/jni/fteqw/engine/common/pr_bgcmd.c
++++ b/Q3E/src/main/jni/fteqw/engine/common/pr_bgcmd.c
+@@ -2593,10 +2593,18 @@ static qboolean QC_PathRequiresSandbox(const char *name)
+ 		huds\*.cfg  (shouldn't have any passwords. yay editing)
+ 		models\*.*  (xonotic is evil)
+ 		sound\*.*  (xonotic is evil)
++
++  	*=*= NZ:P EDIT: We need write access to scripts\ directory. Sorry, spike! *=*=
+ 	*/
++	// NZ:P START
++	if (!strnicmp(name, "scripts/", 8))
++		return false;
++	// NZ:P END
++
+ 	if ((!strchr(name, '/') || !strnicmp(name, "configs/", 8))	//
+ 		&& !stricmp(COM_GetFileExtension(name, NULL), ".cfg"))
+ 		return true;
++	
+ 	return false;
+ }
+ 
+@@ -2625,7 +2633,7 @@ qboolean QC_FixFileName(const char *name, const char **result, const char **fall
+ 		*fallbackread = NULL;	//don't be weird.
+ 		*result = name;	//already has a data/ prefix.
+ 	}
+-	else if (COM_CheckParm("-unsafefopen") && !QC_PathRequiresSandbox(name))
++	else if (!QC_PathRequiresSandbox(name))
+ 	{
+ 		*fallbackread = va("data/%s", name);	//in case the mod was distributed with a data/ subdir.
+ 		*result = name;
+diff --git a/Q3E/src/main/jni/fteqw/engine/gl/gl_font.c b/Q3E/src/main/jni/fteqw/engine/gl/gl_font.c
+index 5ea4d0d..dc633bc 100644
+--- a/Q3E/src/main/jni/fteqw/engine/gl/gl_font.c
++++ b/Q3E/src/main/jni/fteqw/engine/gl/gl_font.c
+@@ -302,7 +302,7 @@ typedef struct fontface_s
+ static fontface_t *faces;
+ 
+ 
+-#define GEN_CONCHAR_GLYPHS 0	//set to 0 or 1 to define whether to generate glyphs from conchars too, or if it should just draw them as glquake always used to
++#define GEN_CONCHAR_GLYPHS 0	//set to 0 or 1 to define whether to generate glyphs from charset too, or if it should just draw them as glquake always used to
+ extern cvar_t cl_noblink;
+ extern cvar_t con_ocranaleds;
+ 
+@@ -1261,7 +1261,7 @@ static struct charcache_s *Font_TryLoadGlyph(font_t *f, CHARIDXTYPE charidx)
+ 		unsigned char *s;
+ 		int scale;
+ 		int x,y, ys;
+-		qbyte *draw_chars = W_GetLumpName("conchars");
++		qbyte *draw_chars = W_GetLumpName("charset");
+ 		if (draw_chars)
+ 		{
+ 			d = img;
+@@ -2042,12 +2042,12 @@ static texid_t Font_LoadReplacementConchars(void)
+ {
+ 	texid_t tex;
+ 	//q1 replacement
+-	tex = R_LoadHiResTexture("gfx/conchars.lmp", NULL, (r_font_linear.ival?IF_LINEAR:IF_NEAREST)|IF_PREMULTIPLYALPHA|IF_LOADNOW|IF_UIPIC|IF_NOMIPMAP|IF_NOGAMMA|IF_NOPURGE);
++	tex = R_LoadHiResTexture("gfx/charset.lmp", NULL, (r_font_linear.ival?IF_LINEAR:IF_NEAREST)|IF_PREMULTIPLYALPHA|IF_LOADNOW|IF_UIPIC|IF_NOMIPMAP|IF_NOGAMMA|IF_NOPURGE);
+ 	TEXDOWAIT(tex);
+ 	if (TEXLOADED(tex))
+ 		return tex;
+ 	//q2
+-	tex = R_LoadHiResTexture("pics/conchars.pcx", NULL, (r_font_linear.ival?IF_LINEAR:IF_NEAREST)|IF_PREMULTIPLYALPHA|IF_LOADNOW|IF_UIPIC|IF_NOMIPMAP|IF_NOGAMMA|IF_NOPURGE);
++	tex = R_LoadHiResTexture("pics/charset.pcx", NULL, (r_font_linear.ival?IF_LINEAR:IF_NEAREST)|IF_PREMULTIPLYALPHA|IF_LOADNOW|IF_UIPIC|IF_NOMIPMAP|IF_NOGAMMA|IF_NOPURGE);
+ 	TEXDOWAIT(tex);
+ 	if (TEXLOADED(tex))
+ 		return tex;
+@@ -2062,14 +2062,14 @@ static texid_t Font_LoadReplacementConchars(void)
+ #ifdef HEXEN2
+ static texid_t Font_LoadHexen2Conchars(qboolean iso88591)
+ {
+-	//gulp... so it's come to this has it? rework the hexen2 conchars into the q1 system.
++	//gulp... so it's come to this has it? rework the hexen2 charset into the q1 system.
+ 	texid_t tex;
+ 	unsigned int i, x;
+ 	unsigned char *tempchars;
+ 	unsigned char *in, *out, *outbuf;
+-	FS_LoadFile("gfx/menu/conchars.lmp", (void**)&tempchars);
++	FS_LoadFile("gfx/menu/charset.lmp", (void**)&tempchars);
+ 
+-	/*hexen2's conchars are arranged 32-wide, 16 high.
++	/*hexen2's charset are arranged 32-wide, 16 high.
+ 	the upper 8 rows are 256 8859-1 chars
+ 	the lower 8 rows are a separate set of recoloured 8859-1 chars.
+ 
+@@ -2180,7 +2180,7 @@ static texid_t Font_LoadFallbackConchars(void)
+ 	int width, height;
+ 	unsigned int i;
+ 	uploadfmt_t format;
+-	qbyte *lump = ReadRawImageFile(default_conchar, sizeof(default_conchar), &width, &height, &format, false, "conchars");
++	qbyte *lump = ReadRawImageFile(default_conchar, sizeof(default_conchar), &width, &height, &format, false, "charset");
+ 	if (!lump || (format != PTI_RGBX8 && format != PTI_RGBA8 && format != PTI_LLLX8))
+ 		return r_nulltex;
+ 	/*convert greyscale to alpha*/
+@@ -2229,7 +2229,7 @@ static texid_t Font_LoadDefaultConchars(enum fontfmt_e *fmt)
+ 		*fmt = FMT_QUAKE;
+ 		return tex;
+ 	}
+-	Sys_Error("Unable to load any conchars\n");
++	Sys_Error("Unable to load any charset\n");
+ }
+ 
+ typedef struct 
+@@ -2648,7 +2648,7 @@ struct font_s *Font_LoadFont(const char *fontfilename, float vheight, float scal
+ 	}
+ 
+ 	if (!f->faces && !TEXLOADED(f->singletexture) && r_font_linear.ival)
+-		Font_LoadFontLump(f, "conchars");
++		Font_LoadFontLump(f, "charset");
+ 
+ 	defaultplane = INVALIDPLANE;/*assume the bitmap plane - don't use the fallback as people don't think to use com_parseutf8*/
+ 	if (!explicit && TEXLOADED(f->singletexture))
+diff --git a/Q3E/src/main/jni/fteqw/engine/gl/gl_model.c b/Q3E/src/main/jni/fteqw/engine/gl/gl_model.c
+index 02fb7ee..0e9a7e1 100644
+--- a/Q3E/src/main/jni/fteqw/engine/gl/gl_model.c
++++ b/Q3E/src/main/jni/fteqw/engine/gl/gl_model.c
+@@ -1140,8 +1140,8 @@ static void Mod_LoadModelWorker (void *ctx, void *data, size_t a, size_t b)
+ #endif
+ 			)
+ 		mod->engineflags |= MDLF_FLAME|MDLF_NOSHADOWS;
+-	else if (!strcmp(mod->publicname, "progs/bolt.mdl")
+-		|| !strcmp(mod->publicname, "progs/bolt2.mdl")
++	else if (!strcmp(mod->publicname, "models/misc/bolt.mdl")
++		|| !strcmp(mod->publicname, "models/misc/bolt2.mdl")
+ 		|| !strcmp(mod->publicname, "progs/bolt3.mdl")
+ 		|| !strcmp(mod->publicname, "progs/beam.mdl")
+ #ifdef HEXEN2
+diff --git a/Q3E/src/main/jni/fteqw/engine/server/sv_init.c b/Q3E/src/main/jni/fteqw/engine/server/sv_init.c
+index 05f4e1b..6746d96 100644
+--- a/Q3E/src/main/jni/fteqw/engine/server/sv_init.c
++++ b/Q3E/src/main/jni/fteqw/engine/server/sv_init.c
+@@ -608,7 +608,6 @@ void SV_UnspawnServer (void)	//terminate the running server.
+ 	int i;
+ 	if (sv.state)
+ 	{
+-		Con_TPrintf("Server ended\n");
+ 		SV_FinalMessage("Server unspawned\n");
+ 
+ 		PR_PreShutdown();
+@@ -1701,8 +1700,6 @@ MSV_OpenUserDatabase();
+ 	SV_FilterImpulseInit();
+ 
+ 	InfoBuf_SetValueForKey (&svs.info, "map", svs.name);
+-	if (sv.allocated_client_slots != 1)
+-		Con_TPrintf ("Server spawned.\n");	//misc filenotfounds can be misleading.
+ 
+ 	if (!startspot)
+ 	{
+diff --git a/Q3E/src/main/jni/fteqw/engine/server/sv_main.c b/Q3E/src/main/jni/fteqw/engine/server/sv_main.c
+index 8bc36e9..89c18db 100644
+--- a/Q3E/src/main/jni/fteqw/engine/server/sv_main.c
++++ b/Q3E/src/main/jni/fteqw/engine/server/sv_main.c
+@@ -614,14 +614,6 @@ void SV_DropClient (client_t *drop)
+ 		Z_Free(drop->centerprintstring);
+ 	drop->centerprintstring = NULL;
+ 
+-	if (!drop->redirect && drop->state > cs_zombie)
+-	{
+-		if (drop->spectator)
+-			Con_TPrintf ("Spectator \"%s\" removed\n",drop->name);
+-		else
+-			Con_TPrintf ("Client \"%s\" removed\n",drop->name);
+-	}
+-
+ #if defined(HAVE_LEGACY) && defined(MVD_RECORDING)
+ 	SV_DownloadQueueClear(drop);
+ #endif
+diff --git a/Q3E/src/main/jni/fteqw/engine/server/sv_user.c b/Q3E/src/main/jni/fteqw/engine/server/sv_user.c
+index b59ca9b..54ce20d 100644
+--- a/Q3E/src/main/jni/fteqw/engine/server/sv_user.c
++++ b/Q3E/src/main/jni/fteqw/engine/server/sv_user.c
+@@ -4636,13 +4636,7 @@ void SV_Pause_f (void)
+ 		return;
+ 	}
+ 
+-	if (SV_TogglePause(host_client))
+-	{
+-		if (sv.paused & PAUSE_EXPLICIT)
+-			SV_BroadcastTPrintf (PRINT_HIGH, "%s paused the game\n", host_client->name);
+-		else
+-			SV_BroadcastTPrintf (PRINT_HIGH, "%s unpaused the game\n", host_client->name);
+-	}
++	SV_TogglePause(host_client);
+ 
+ }
+ 
