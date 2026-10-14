@@ -1,3 +1,10 @@
+NZ:P's engine changes (fog command, charset, bolt models, scripts/ sandbox, saveconfig from gamecode, ...) ported onto idTech4A++'s copy of FTEQW.
+
+Apply from the root of the idTech4A++ checkout (tag v1.1.0harmattan73):
+    git apply --check --whitespace=nowarn nzp-fteqw-engine.patch && git apply --whitespace=nowarn nzp-fteqw-engine.patch
+
+Licence: GPL-2.0-or-later (see LICENSE). Derived from https://github.com/nzp-team/fteqw (GPL-2.0).
+
 diff --git a/Q3E/src/main/jni/fteqw/engine/client/cl_ents.c b/Q3E/src/main/jni/fteqw/engine/client/cl_ents.c
 index 90f11eb..6893a83 100644
 --- a/Q3E/src/main/jni/fteqw/engine/client/cl_ents.c

@@ -1,0 +1,76 @@
+Settings persistence: loads user_settings.cfg at startup (where NZ:P's menus save to) and saves changed settings when the app is paused, closed or the game quits.
+
+Apply from the root of the idTech4A++ checkout (tag v1.1.0harmattan73):
+    git apply --check --whitespace=nowarn nzp-fteqw-settings.patch && git apply --whitespace=nowarn nzp-fteqw-settings.patch
+
+Licence: GPL-2.0-or-later (see LICENSE). Modifies FTEQW (GPL-2.0-or-later) and the idTech4A++ Android glue (GPL-3.0).
+
+diff --git a/Q3E/src/main/jni/fteqw/engine/client/cl_main.c b/Q3E/src/main/jni/fteqw/engine/client/cl_main.c
+index 74b1256..cf8e1ad 100644
+--- a/Q3E/src/main/jni/fteqw/engine/client/cl_main.c
++++ b/Q3E/src/main/jni/fteqw/engine/client/cl_main.c
+@@ -7725,6 +7725,10 @@ void CL_ExecInitialConfigs(char *resetcommand, qboolean fullvidrestart)
+ 			Cbuf_AddText ("exec autoexec.cfg\n", RESTRICT_LOCAL);
+ 	}
+ #endif
++	//NZ:P Start -- the NZ:P menus save their settings with 'saveconfig user_settings.cfg', but nothing ever read that back.
++	if (COM_FCheckExists ("user_settings.cfg"))
++		Cbuf_AddText ("exec user_settings.cfg\n", RESTRICT_LOCAL);
++	//NZ:P End
+ #ifdef QUAKESPYAPI
+ 	if (COM_FCheckExists ("frontend.cfg"))
+ 		Cbuf_AddText ("exec frontend.cfg\n", RESTRICT_LOCAL);
+diff --git a/Q3E/src/main/jni/fteqw/engine/client/sys_android.c b/Q3E/src/main/jni/fteqw/engine/client/sys_android.c
+index fe03a55..1f3c436 100644
+--- a/Q3E/src/main/jni/fteqw/engine/client/sys_android.c
++++ b/Q3E/src/main/jni/fteqw/engine/client/sys_android.c
+@@ -236,6 +236,16 @@ static qboolean FTENativeActivity_wantrelative()
+ 	return !Key_MouseShouldBeFree();
+ }
+ 
++//NZ:P-Android: settings must survive a restart.
++//The app never goes through the engine's own 'save your settings?' quit prompt (it just ends the process),
++//so write any changed (archived) cvars + binds out ourselves. This is the same file the NZ:P menus write
++//with 'saveconfig user_settings.cfg' (see CL_ExecInitialConfigs, which loads it again at startup).
++static void Sys_AndroidSaveSettings(void)
++{
++	if (host_initialized && Cvar_UnsavedArchive())
++		Cmd_ExecuteString("saveconfig user_settings.cfg\n", RESTRICT_LOCAL);
++}
++
+ int main(int argc, char **argv)
+ {
+     char tmp[MAX_OSPATH] = { 0 };
+@@ -302,6 +312,14 @@ int main(int argc, char **argv)
+ 	r_forcevidrestart = 2;
+ 	while (q3e_running)
+ 	{
++		{	//NZ:P-Android: android may kill a paused app at any time, so save when we get paused.
++			static qboolean wasPaused;
++			qboolean isPaused = q3e_paused;
++			if (isPaused && !wasPaused)
++				Sys_AndroidSaveSettings();
++			wasPaused = isPaused;
++		}
++
+ 		if (r_forcevidrestart)
+ 		{
+ 			r_forceheadless = r_forcevidrestart&1;
+@@ -336,6 +354,9 @@ int main(int argc, char **argv)
+ 			Sys_Sleep(sleeptime);
+ 	}
+ 
++	//NZ:P-Android: the app is closing us down (back button/exit), so this is our last chance to save.
++	Sys_AndroidSaveSettings();
++
+ 	//don't permanently hold these when there's no active activity.
+ 	//(hopefully there's no gl context active right now...)
+ 
+@@ -409,6 +430,7 @@ void Sys_Shutdown(void)
+ void Sys_Quit(void)
+ {
+ #ifndef SERVERONLY
++	Sys_AndroidSaveSettings();	//NZ:P-Android: the 'quit' command doesn't save anything by itself.
+ 	Host_Shutdown ();
+ #else
+ 	SV_Shutdown();

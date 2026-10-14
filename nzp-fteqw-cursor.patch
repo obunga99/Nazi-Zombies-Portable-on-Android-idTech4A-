@@ -1,3 +1,10 @@
+Menu cursor fix: converts relative mouse deltas from physical pixels to the engine's scaled 2D coordinates (client/in_generic.c).
+
+Apply from the root of the idTech4A++ checkout (tag v1.1.0harmattan73):
+    git apply --check --whitespace=nowarn nzp-fteqw-cursor.patch && git apply --whitespace=nowarn nzp-fteqw-cursor.patch
+
+Licence: GPL-2.0-or-later (see LICENSE). Modifies FTEQW, which is GPL-2.0-or-later.
+
 diff --git a/Q3E/src/main/jni/fteqw/engine/client/in_generic.c b/Q3E/src/main/jni/fteqw/engine/client/in_generic.c
 index 7d9cff4..017f89a 100644
 --- a/Q3E/src/main/jni/fteqw/engine/client/in_generic.c
